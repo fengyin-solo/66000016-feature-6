@@ -6,6 +6,7 @@ const SERVER_URL = '/';
 class SocketService {
   private socket: Socket | null = null;
   private boardId: string | null = null;
+  private username: string | null = null;
 
   connect(): Socket {
     if (!this.socket) {
@@ -15,6 +16,12 @@ class SocketService {
         reconnectionAttempts: 3,
         reconnectionDelay: 2000,
         timeout: 10000,
+      });
+      // 断线重连后重新加入画板，让服务器下发最新在线成员名单
+      this.socket.on('connect', () => {
+        if (this.boardId && this.username) {
+          this.socket?.emit('join-board', { boardId: this.boardId, username: this.username });
+        }
       });
     }
     this.socket.connect();
@@ -28,11 +35,16 @@ class SocketService {
       this.socket = null;
     }
     this.boardId = null;
+    this.username = null;
   }
 
   joinBoard(boardId: string, username: string): void {
     this.boardId = boardId;
-    this.socket?.emit('join-board', { boardId, username });
+    this.username = username;
+    // 尚未连接时不主动发送，连接建立后由 connect 处理器统一发出
+    if (this.socket?.connected) {
+      this.socket.emit('join-board', { boardId, username });
+    }
   }
 
   moveCursor(x: number, y: number): void {

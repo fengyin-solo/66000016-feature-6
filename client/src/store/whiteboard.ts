@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { Board, BoardElement, CursorPosition, CanvasTransform, ToolType, Layer } from '../types';
 import { socketService } from '../services/socket';
+import { saveBoardSession } from '../services/boardSession';
 
 interface WhiteboardState {
   board: Board | null;
@@ -27,11 +28,26 @@ interface WhiteboardState {
   toggleLayerVisibility: (index: number) => void;
   toggleLayerLock: (index: number) => void;
   setCanvasTransform: (transform: CanvasTransform) => void;
+  applyCanvasTransform: (transform: CanvasTransform) => void;
   updateCursor: (cursor: CursorPosition) => void;
   removeCursor: (socketId: string) => void;
   setCursors: (cursors: CursorPosition[]) => void;
+  clearCursors: () => void;
   setUsername: (name: string) => void;
 }
+
+// 把当前的缩放/平移与工具选择保存到本地，供下次进入同一画板时恢复
+const persistBoardSession = (get: () => WhiteboardState) => {
+  const { board, canvasTransform, activeTool } = get();
+  if (!board) return;
+  saveBoardSession({
+    version: 1,
+    boardId: board._id,
+    transform: canvasTransform,
+    activeTool,
+    savedAt: Date.now(),
+  });
+};
 
 export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   board: null,
@@ -45,7 +61,10 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   username: `User_${Math.random().toString(36).substr(2, 6)}`,
 
   setBoard: (board) => set({ board }),
-  setActiveTool: (tool) => set({ activeTool: tool }),
+  setActiveTool: (tool) => {
+    set({ activeTool: tool });
+    persistBoardSession(get);
+  },
   setStrokeColor: (color) => set({ strokeColor: color }),
   setFillColor: (color) => set({ fillColor: color }),
   setStrokeWidth: (width) => set({ strokeWidth: width }),
@@ -113,8 +132,15 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   },
 
   setCanvasTransform: (transform) => {
+    // 本地手势（滚轮缩放等）：更新视图、广播给协作者并记录到本地会话
     set({ canvasTransform: transform });
     socketService.canvasTransform(transform);
+    persistBoardSession(get);
+  },
+
+  applyCanvasTransform: (transform) => {
+    // 远端同步或恢复上次状态：只更新本地视图，不再广播，避免回声循环
+    set({ canvasTransform: transform });
   },
 
   updateCursor: (cursor) => {
@@ -134,6 +160,8 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
     cursorsList.forEach(c => cursors.set(c.socketId, c));
     set({ cursors });
   },
+
+  clearCursors: () => set({ cursors: new Map() }),
 
   setUsername: (name) => set({ username: name }),
 }));

@@ -8,19 +8,40 @@ function setupSocketHandlers(io) {
     console.log(`User connected: ${socket.id}`);
 
     socket.on('join-board', ({ boardId, username }) => {
+      const existing = cursorPositions.get(socket.id);
+      const alreadyInBoard = existing && existing.boardId === boardId;
+
+      // 同一连接换画板时，先从旧画板的在场记录中移除并通知旧画板成员
+      if (existing && existing.boardId !== boardId) {
+        const prevUsers = activeUsers.get(existing.boardId);
+        if (prevUsers) {
+          prevUsers.delete(socket.id);
+          if (prevUsers.size === 0) activeUsers.delete(existing.boardId);
+        }
+        socket.leave(`board:${existing.boardId}`);
+        socket.to(`board:${existing.boardId}`).emit('user-left', { socketId: socket.id, username: existing.username });
+      }
+
       socket.join(`board:${boardId}`);
-      
+
       if (!activeUsers.has(boardId)) {
         activeUsers.set(boardId, new Set());
       }
       activeUsers.get(boardId).add(socket.id);
-      
-      cursorPositions.set(socket.id, { x: 0, y: 0, username, boardId });
-      
-      // Notify others in the room
-      socket.to(`board:${boardId}`).emit('user-joined', { socketId: socket.id, username });
-      
-      // Send current active users to the joiner
+
+      cursorPositions.set(socket.id, {
+        x: alreadyInBoard ? existing.x : 0,
+        y: alreadyInBoard ? existing.y : 0,
+        username,
+        boardId
+      });
+
+      // 重复加入（断线重连等）不再重复广播加入通知
+      if (!alreadyInBoard) {
+        socket.to(`board:${boardId}`).emit('user-joined', { socketId: socket.id, username });
+      }
+
+      // 每次都重新下发当前在线成员，让加入方以服务器名单为准重新核对
       const users = [];
       for (const [sid, data] of cursorPositions) {
         if (data.boardId === boardId && sid !== socket.id) {
