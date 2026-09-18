@@ -6,6 +6,8 @@ const SERVER_URL = '/';
 class SocketService {
   private socket: Socket | null = null;
   private boardId: string | null = null;
+  private username: string | null = null;
+  private everConnected = false;
 
   connect(): Socket {
     if (!this.socket) {
@@ -15,6 +17,13 @@ class SocketService {
         reconnectionAttempts: 3,
         reconnectionDelay: 2000,
         timeout: 10000,
+      });
+      // 断线重连成功后自动重新加入房间，由服务端重新下发在线成员列表
+      this.socket.on('connect', () => {
+        if (this.everConnected && this.boardId && this.username) {
+          this.socket?.emit('join-board', { boardId: this.boardId, username: this.username });
+        }
+        this.everConnected = true;
       });
     }
     this.socket.connect();
@@ -28,11 +37,18 @@ class SocketService {
       this.socket = null;
     }
     this.boardId = null;
+    this.username = null;
+    this.everConnected = false;
   }
 
   joinBoard(boardId: string, username: string): void {
     this.boardId = boardId;
+    this.username = username;
     this.socket?.emit('join-board', { boardId, username });
+  }
+
+  getBoardId(): string | null {
+    return this.boardId;
   }
 
   moveCursor(x: number, y: number): void {
